@@ -1,7 +1,9 @@
 .idea/
 .jbeval/
-
+.venv
 .env
 
 plan.json
 summary.json
+__pycache__/
+*.pyc
