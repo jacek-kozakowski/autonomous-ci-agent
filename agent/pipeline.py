@@ -1,8 +1,9 @@
-from typing import TypedDict, List, Dict, Any
+from typing import TypedDict, List, Dict, Any, Set
 from langgraph.graph import StateGraph, START, END
 
 from git_ops import clone_repo
-from docker_runner import build_image
+from docker_runner import build_image, run_tests
+from log_parser import parse_test_logs
 from retry import retry_policy
 
 class AgentState(TypedDict):
@@ -11,8 +12,9 @@ class AgentState(TypedDict):
     build_logs: Dict[str, Any]
     test_logs: str
     failing_tests: List[str]
-    error_types: List[str]
-    suspected_files: List[str]
+    error_types: Set[str]
+    suspected_files: Set[str]
+    test_results: Dict[str, Any]
     patch: int
     retries: int
 
@@ -42,16 +44,35 @@ def build_node(state: AgentState) -> AgentState:
     }
 
 def run_tests_node(state: AgentState) -> AgentState:
-    """
-    Node for unit/integration running tests
-    """
-    return state
+    build_logs = state.get("build_logs", {})
+
+    is_python = build_logs.get("python_detected", False)
+    is_cpp = build_logs.get("cpp_detected", False)
+
+    result = run_tests(state["repo_path"], is_python, is_cpp)
+
+    retries = 0 if state.get("retries") is None else state["retries"] + 1
+    return {
+        **state,
+        "test_logs": result["stdout"] + "\n" + result["stderr"],
+        "retries": retries,
+    }
 
 def analyze_logs_node(state: AgentState) -> AgentState:
-    """
-    Node for parsing build/test logs
-    """
-    return state
+    parsed_tests = parse_test_logs(state["test_logs"])
+    test_results = {
+        "stage" : "tests",
+        "status" : "success" if not parsed_tests["failing_tests"] else "failed",
+        "attempt" : state["retries"],
+        "errors" : parsed_tests["errors"],
+    }
+    return {
+        **state,
+        "failing_tests": parsed_tests["failing_tests"],
+        "error_types": parsed_tests["error_types"],
+        "suspected_files": parsed_tests["suspected_files"],
+        "test_results": test_results
+    }
 
 def propose_fix_node(state: AgentState) -> AgentState:
     """

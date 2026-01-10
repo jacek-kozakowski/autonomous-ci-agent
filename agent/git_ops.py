@@ -9,7 +9,7 @@ def clone_repo(repo_url: str) -> str:
     repo_name = repo_url.split("/")[-1]
     counter = 1
     while True:
-        target_dir = repos_dir / f"{repo_name}_{counter}"
+        target_dir = repos_dir / f"{repo_name[:-4]}_{counter}"
         if not target_dir.exists():
             break
         counter += 1

@@ -27,3 +27,33 @@ def test_build_image(mock_joinpath, mock_run):
     assert result["python_detected"] is True
     assert result["cpp_detected"] is False
     assert result["exit_code"] == 0
+
+@patch("subprocess.run")
+def test_run_tests_python(mock_run):
+    mock_run.return_value = MagicMock(returncode=0, stdout="Test success", stderr="")
+
+    result = run_tests("tests/test_repo", True, False)
+
+    args, _ = mock_run.call_args
+    command_list = args[0]
+    test_script = command_list[-1]
+    assert "docker" in command_list
+    assert "tests/test_repo:/workspace" in command_list
+    assert "pip install pytest" in test_script
+    assert "pytest" in test_script
+    assert result["exit_code"] == 0
+
+@patch("subprocess.run")
+def test_run_tests_cpp(mock_run):
+    mock_run.return_value = MagicMock(returncode=0, stdout="Test success", stderr="")
+
+    result = run_tests("tests/test_repo", False, True)
+
+    args, _ = mock_run.call_args
+    command_list = args[0]
+    test_script = command_list[-1]
+    assert "docker" in command_list
+    assert "tests/test_repo:/workspace" in command_list
+    assert "ctest --output-on-failure" in test_script
+    assert "pytest" not in test_script
+    assert result["exit_code"] == 0

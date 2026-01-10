@@ -7,8 +7,7 @@
       "type": "AssertionError",
       "message": "Expected status code 200, got 500",
       "file": "tests/test_api.py",
-      "line": 34,
-      "retryable": false
+      "line": 10
     }
   ]
 }
