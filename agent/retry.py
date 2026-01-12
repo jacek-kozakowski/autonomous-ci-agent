@@ -1,4 +1,5 @@
 MAX_RETRIES = 3
+MAX_PATCHES = 5
 
 RETRIABLE_TESTS = ["ConnectionError", "NetworkError", "TimeoutError", "NoSuchElementException", "ResourceUnavailable"]
 NON_RETRIABLE_TESTS = ["AssertionError", "ModuleNotFoundError", ]
@@ -15,4 +16,7 @@ def retry_policy(retries: int, error_types: list) -> bool:
         return True
 
     return False
+
+def patch_retry_policy(patch: int) -> bool:
+    return patch >= MAX_PATCHES
 

@@ -1,8 +1,28 @@
 import subprocess
 from pathlib import Path
 from typing import Any
-def build_image(repo_path: str) -> dict[str, Any]:
 
+def ensure_ci_image_exists():
+    check = subprocess.run(["docker", "build", "-t", "ci-image", "."], capture_output=True)
+
+    if check.returncode == 0:
+        print("CI image built successfully.")
+        return
+
+    project_root = Path(__file__).parent.parent
+    docker_dir = project_root / "docker"
+
+    if not docker_dir.exists():
+        raise Exception(f"Docker directory not found at {docker_dir}.")
+
+    result = subprocess.run(["docker", "build", "-t", "ci-image", "."], cwd=docker_dir, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        raise Exception(f"Failed to build CI image: {result.stderr}")
+
+
+def build_image(repo_path: str) -> dict[str, Any]:
+    ensure_ci_image_exists()
     build_script = """
     set -e
     if [ -f pyproject.toml ] || [ -f setup.py ] || [ -f requirements.txt ]; then
