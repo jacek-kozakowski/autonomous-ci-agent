@@ -114,7 +114,7 @@ def _apply_patch_node(state: AgentState) -> AgentState:
     if not proposed_fixes:
         print("No proposed fixes found, skipping patch application.")
         return state
-    apply_fix(state["repo_path"], proposed_fixes)
+    apply_fix(state["repo_path"], proposed_fixes, state["patch"])
     return state
 
 

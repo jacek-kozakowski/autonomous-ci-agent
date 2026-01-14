@@ -1,10 +1,10 @@
 from pathlib import Path
-
+import difflib
 from langchain_core.tools import tool
 from langchain.agents import create_agent
 import re
 
-def get_file_structure(repo_path: str) -> str:
+def _get_file_structure(repo_path: str) -> str:
     """"
     returns a string representation of the file structure of the repo
     """
@@ -22,7 +22,7 @@ def get_file_structure(repo_path: str) -> str:
     return "\n".join(structure)
 
 
-def parse_fix_response(response_text: str) -> dict[str, str]:
+def _parse_fix_response(response_text: str) -> dict[str, str]:
     """
     Parses the response from the agent into a dictionary of source file paths and their updated content.
     """
@@ -35,7 +35,7 @@ def parse_fix_response(response_text: str) -> dict[str, str]:
         file_match = re.search(r"SOURCE_FILE:\s*(.*)", part)
         if not file_match:
             continue
-        file_path = file_match.group(1)
+        file_path = file_match.group(1).strip()
         code_match = re.search(r"FIXED_CODE:\n```python\n(.*)\n```", part, re.DOTALL)
         if code_match:
             new_code = code_match.group(1)
@@ -46,11 +46,45 @@ def parse_fix_response(response_text: str) -> dict[str, str]:
 
     return fixes
 
+def _make_changes_log(repo_path: str, fixes: dict[str, str], patch: int) -> None:
+    """
+    Generates a markdown changes log with diff for all fixes
+    """
+
+    changes_log = []
+    changes_log.append(f"# Changes Log PATCH: {patch}\n\n")
+
+    for file_path, new_code in fixes.items():
+        full_path = Path(repo_path) / file_path
+        try:
+            original_code = full_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            original_code = ""
+
+        diff = difflib.unified_diff(original_code.splitlines(keepends=True),
+                                    new_code.splitlines(keepends=True),
+                                        fromfile=f"a/{file_path}",
+                                        tofile=f"b/{file_path}",
+                                        lineterm=''
+                                    )
+
+        changes_log.append(f"## {file_path}\n\n")
+        changes_log.append("```diff\n")
+        changes_log.extend(list(diff))
+        changes_log.append("\n```\n\n")
+
+    changes_path = Path(repo_path) / "changes"
+    changes_path.mkdir(parents=True, exist_ok=True)
+    changes_file = changes_path / f"CHANGES_{patch}.md"
+    changes_file.write_text("".join(changes_log), encoding='utf-8')
+    print(f"Changes logged to {changes_file}")
+
+
 
 
 def propose_fix(llm, repo_path: str, test_results: dict,
                 failing_tests: list[str]) -> dict[str, str]:
-    file_structure = get_file_structure(repo_path)
+    file_structure = _get_file_structure(repo_path)
 
     @tool
     def read_repo_file(relative_path: str) -> str:
@@ -79,14 +113,18 @@ def propose_fix(llm, repo_path: str, test_results: dict,
     LOGS:
     {test_results}
     
+    RULES:
+    1. Make sure you only change the code that is not passing the tests and do not fix any other code no matter how minor the change would be.
+    2. Do NOT change whitespace or formatting, and do NOT make any stylistic changes.
+    3. Only modify lines that are semantically required to fix the failing tests.
+    4. All unchanged lines must remain byte-for-byte identical.
+    
     YOUR TASK:
     1. Analyze the LOGS and FAILING TESTS to deduce which SOURCE FILES (implementation) are broken using REPO STRUCTURE.
     2. Use the `read_repo_file` tool to read the contents of the suspected source code files (and tests if needed).
     3. Analyze the code to find the bug/problem and understand it in detail.
     4. If there is no bug in the SOURCE FILE, analyze the test and if there is a bug propose a fix of the test file. 
     4. Propose a fix by proposing the COMPLETE updated content of the fixed source file.
-    
-    Make sure you only change the code that is not passing the tests and do not fix any other code no matter how minor the change would be.
     
     OUTPUT FORMAT:
     It is crucial that you return the fix plan in the following format:
@@ -101,13 +139,15 @@ def propose_fix(llm, repo_path: str, test_results: dict,
 
     last_message = response["messages"][-1].content
     
-    return parse_fix_response(last_message)
+    return _parse_fix_response(last_message)
 
 
-def apply_fix(repo_path: str, fixes: dict[str, str]):
+def apply_fix(repo_path: str, fixes: dict[str, str], patch: int):
     if not fixes:
         print("No fixes to apply.")
         return
+
+    _make_changes_log(repo_path, fixes, patch)
 
     for file_path, new_code in fixes.items():
         try:

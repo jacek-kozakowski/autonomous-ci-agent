@@ -7,11 +7,9 @@ state = {
 }
 
 if __name__ == "__main__":
-    graph = create_graph()
-
     print("\033[92mAutonomous CI Agent started.")
     repo = input("Enter repo URL or path: ")
-
+    graph = create_graph()
     if repo.endswith(".git"):
         state["repo_url"] = repo
         graph.invoke(state)

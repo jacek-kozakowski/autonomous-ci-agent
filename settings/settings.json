@@ -1,0 +1,4 @@
+{
+  "max_retries" : 5,
+  "max_patches" : 3
+}

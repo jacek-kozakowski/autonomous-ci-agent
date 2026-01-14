@@ -1,8 +1,10 @@
-MAX_RETRIES = 3
-MAX_PATCHES = 5
+import json
+settings = json.load(open("settings/settings.json"))
+MAX_RETRIES = settings["max_retries"]
+MAX_PATCHES = settings["max_patches"]
 
 RETRIABLE_TESTS = ["ConnectionError", "NetworkError", "TimeoutError", "NoSuchElementException", "ResourceUnavailable"]
-NON_RETRIABLE_TESTS = ["AssertionError", "ModuleNotFoundError", ]
+NON_RETRIABLE_TESTS = ["AssertionError", "ModuleNotFoundError"]
 
 
 def retry_policy(retries: int, error_types: list) -> bool:
