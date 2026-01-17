@@ -9,3 +9,5 @@ plan.json
 summary.json
 __pycache__/
 *.pyc
+build/
+.cache/

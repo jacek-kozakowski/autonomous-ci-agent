@@ -1,67 +1,64 @@
-from typing import Any
+import xml.etree.ElementTree as ET
 import re
-def parse_test_logs(test_logs: str) -> dict[str, Any]:
+from typing import Any
+from pathlib import Path
+
+def parse_test_logs(repo_path: str) -> dict[str, Any]:
+    # Standard location for the report
+    report_path = Path(repo_path) / "report.xml"
+    
+    if not report_path.exists():
+        print(f"Warning: Test report not found at {report_path}")
+        return {
+            "failing_tests": [],
+            "error_types": set(),
+            "suspected_files": set(),
+            "errors": []
+        }
+
+    tree = ET.parse(report_path)
+    root = tree.getroot()
 
     errors = []
     failing_tests = []
     error_types = set()
     suspected_files = set()
 
-    failed_test_regex = re.compile(r"FAILED\s+(.*?)::(\w+)")
-    error_regex = re.compile(r"E\s+(\w+Error):\s+(.*)")
+    for testcase in root.iter('testcase'):
+        issue = testcase.find('failure')
+        if issue is None:
+            issue = testcase.find('error')
 
-    current_file = None
-    lines = test_logs.split("\n")
-
-    direct_error_regex = re.compile(r"(.*?):(\d+):\s+(\w+Error)")
-
-    pending_errors = []
-
-    for line in lines:
-        match_fail = failed_test_regex.search(line)
-        if match_fail:
-            current_file = match_fail.group(1)
-            test_name = match_fail.group(2)
-            failing_tests.append(f"{current_file}::{test_name}")
-            suspected_files.add(current_file)
-            pending_errors = []
-            continue
-        
-        match_error = error_regex.search(line)
-        if match_error:
-            error_type = match_error.group(1)
-            message = match_error.group(2)
+        if issue is not None:
+            test_name = testcase.get('name')
+            classname = testcase.get('classname', '')
+            failing_tests.append(f"{classname}::{test_name}")
             
-            pending_errors.append({
-                "type": error_type,
-                "message": message
-            })
-            error_types.add(error_type)
-            continue
+            error_message = issue.text or issue.get('message', "unknown error")
+            error_type = issue.get('type', "Failure")
 
-        match_direct = direct_error_regex.search(line)
-        if match_direct:
-            file_path = match_direct.group(1)
-            line_num = int(match_direct.group(2))
-            error_type = match_direct.group(3)
+            file_path = testcase.get('file') or issue.get('file')
+            line_num_str = testcase.get('line') or issue.get('line')
             
-            error_types.add(error_type)
-            suspected_files.add(file_path)
+            if not file_path:
+                match = re.search(r"([\w/.-]+\.\w+):(\d+):", error_message)
+                if match:
+                    file_path = match.group(1)
+                    line_num = int(match.group(2))
+                else:
+                    file_path = "unknown_file"
+                    line_num = 0
+            else:
+                line_num = int(line_num_str) if line_num_str else 0
 
-            found_msg = "See logs for details"
-            
-            for i in range(len(pending_errors) - 1, -1, -1):
-                if pending_errors[i]["type"] == error_type:
-                    found_msg = pending_errors[i]["message"]
-                    pending_errors.pop(i)
-                    break
-            
             errors.append({
                 "type": error_type,
-                "message": found_msg, 
+                "message": error_message.strip(),
                 "file": file_path,
-                "line": line_num,
+                "line": line_num
             })
+            error_types.add(error_type)
+            suspected_files.add(file_path)
 
     return {
         "failing_tests": failing_tests,

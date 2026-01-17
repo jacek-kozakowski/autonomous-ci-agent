@@ -7,10 +7,10 @@ from .git_ops import clone_repo
 from .docker_runner import build_image, run_tests
 from .log_parser import parse_test_logs
 from .retry import retry_policy, patch_retry_policy
-from .fixer import propose_fix, apply_fix
+from .fixer import propose_fix_parallel, apply_fix
 
 load_dotenv()
-llm = ChatOpenAI(model="gpt-4o")
+llm = ChatOpenAI(model="gpt-5.1")
 
 class AgentState(TypedDict):
     repo_url: str
@@ -46,6 +46,8 @@ def _build_node(state: AgentState) -> AgentState:
     """
     result = build_image(state["repo_path"])
     print(f"Built image with code {result.get('exit_code', 1)}")
+    if result.get("exit_code", 1) != 0:
+        print(result.get("stderr", "No build logs found."))
     return {
         **state,
         "build_logs": result
@@ -71,18 +73,16 @@ def _run_tests_node(state: AgentState) -> AgentState:
     }
 
 def _analyze_test_logs_node(state: AgentState) -> AgentState:
-    if not state["test_logs"]:
-        print("No test logs found, skipping analysis.")
-        return state
+    parsed_tests = parse_test_logs(state["repo_path"])
 
-    parsed_tests = parse_test_logs(state["test_logs"])
     test_results = {
-        "stage" : "tests",
-        "status" : "success" if not parsed_tests["failing_tests"] else "failed",
-        "attempt" : state["retries"],
-        "errors" : parsed_tests["errors"],
+        "stage": "tests",
+        "status": "success" if not parsed_tests["errors"] else "failed",
+        "attempt": state["retries"],
+        "errors": parsed_tests["errors"],
     }
     print(f"Analyzed test logs. Status = {test_results['status']}, Errors = {len(test_results['errors'])}.")
+
     return {
         **state,
         "failing_tests": parsed_tests["failing_tests"],
@@ -100,7 +100,7 @@ def _propose_fix_node(state: AgentState) -> AgentState:
         print("No failing tests found, skipping fix proposal.")
         return state
 
-    fixes = propose_fix(llm, state["repo_path"], state["test_results"], state["failing_tests"])
+    fixes = propose_fix_parallel(llm, state["repo_path"], state["test_results"])
     print(f"Proposed {len(fixes)} fixes.")
     return {
         **state,

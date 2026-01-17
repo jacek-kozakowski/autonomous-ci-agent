@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import difflib
 from langchain_core.tools import tool
@@ -36,7 +37,7 @@ def _parse_fix_response(response_text: str) -> dict[str, str]:
         if not file_match:
             continue
         file_path = file_match.group(1).strip()
-        code_match = re.search(r"FIXED_CODE:\n```python\n(.*)\n```", part, re.DOTALL)
+        code_match = re.search(r"FIXED_CODE:\n```(?:\w+)?\n(.*)\n```", part, re.DOTALL)
         if code_match:
             new_code = code_match.group(1)
             fixes[file_path] = new_code
@@ -80,11 +81,44 @@ def _make_changes_log(repo_path: str, fixes: dict[str, str], patch: int) -> None
     print(f"Changes logged to {changes_file}")
 
 
+def group_errors_by_file(test_results: dict) -> dict:
+    errors_by_file = {}
 
+    for error in test_results["errors"]:
+        errors_by_file[error["file"]] = errors_by_file.get(error["file"], []) + [error]
+    return errors_by_file
 
-def propose_fix(llm, repo_path: str, test_results: dict,
-                failing_tests: list[str]) -> dict[str, str]:
+def propose_fix_parallel(llm, repo_path: str, test_results: dict) -> dict[str, str]:
     file_structure = _get_file_structure(repo_path)
+
+    grouped_results = group_errors_by_file(test_results)
+
+    if not grouped_results:
+        print("No errors found, skipping fix proposal.")
+        return {}
+
+    all_fixes = {}
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_file = {
+            executor.submit(
+                _propose_fix, llm, repo_path, errors, file_structure
+            ) : file_path
+            for file_path, errors in grouped_results.items()
+        }
+        for future in as_completed(future_to_file):
+            try:
+                fixes = future.result()
+                if fixes:
+                    all_fixes.update(fixes)
+            except Exception as exc:
+                print(f"Error processing {future_to_file[future]}: {exc}")
+
+    return all_fixes
+
+def _propose_fix(llm, repo_path: str, errors: list[dict[str,str]], file_structure) -> dict[str, str]:
+
+    print("Running a propose fix in parallel.")
 
     @tool
     def read_repo_file(relative_path: str) -> str:
@@ -107,11 +141,8 @@ def propose_fix(llm, repo_path: str, test_results: dict,
     REPO STRUCTURE:
     {file_structure}
     
-    FAILING TESTS:
-    {failing_tests}
-    
     LOGS:
-    {test_results}
+    {errors}
     
     RULES:
     1. Make sure you only change the code that is not passing the tests and do not fix any other code no matter how minor the change would be.
@@ -130,7 +161,7 @@ def propose_fix(llm, repo_path: str, test_results: dict,
     It is crucial that you return the fix plan in the following format:
     SOURCE_FILE: <path>
     FIXED_CODE:
-    ```python
+    ```<language>
     <complete updated source code>
     ```
     """

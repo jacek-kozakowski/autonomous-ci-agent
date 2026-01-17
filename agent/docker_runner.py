@@ -64,14 +64,14 @@ def run_tests(repo_path: str, is_python: bool, is_cpp: bool) -> dict[str, Any]:
             pip install -r requirements.txt;
         fi
         pip install pytest async-timeout
-        pytest
+        pytest --junitxml=report.xml || true
         """
     elif is_cpp:
         test_script = """
         set -e 
         if [ -d build ]; then 
             cd build;
-            ctest --output-on-failure;
+            ctest --output-on-failure --output-junit ../report.xml || true;
         else
             echo "No build directory found";
             exit 1;
